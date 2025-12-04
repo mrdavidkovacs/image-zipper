@@ -72,3 +72,11 @@ jobs:
             PR_NUMBER=${{ github.event.pull_request.number || '' }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:${{ env.TAG }}
           cache-to: type=inline
+
+      - name: Tag and push new version
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ steps.version.outputs.version }}
+          git push origin ${{ steps.version.outputs.version }}
