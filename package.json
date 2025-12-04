@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "express": "^4.19.2",
-    "archiver": "^6.0.2"
+    "express": "^5.2.1",
+    "archiver": "^7.0.1"
   }
 }
