@@ -67,5 +67,8 @@ jobs:
           context: .
           push: true
           tags: ${{ env.TAGS }}
+          build-args: |
+            APP_VERSION=${{ env.TAG }}
+            PR_NUMBER=${{ github.event.pull_request.number || '' }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:${{ env.TAG }}
           cache-to: type=inline
