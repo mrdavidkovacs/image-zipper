@@ -8,13 +8,16 @@ import archiver from "archiver";
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 app.use(express.static("public"));
 
-function download(url, dest) {
+const jobs = new Map();
+
+function download(url, dest, signal) {
     const proto = url.startsWith("https") ? https : http;
 
     return new Promise((resolve, reject) => {
-        proto.get(url, res => {
+        const req = proto.get(url, res => {
             if (res.statusCode !== 200) {
                 reject(new Error(`HTTP ${res.statusCode}`));
                 return;
@@ -22,50 +25,91 @@ function download(url, dest) {
             const file = fs.createWriteStream(dest);
             res.pipe(file);
             file.on("finish", () => file.close(resolve));
-        }).on("error", reject);
+        });
+
+        signal.addEventListener("abort", () => {
+            req.destroy();
+            reject(new Error("aborted"));
+        });
+
+        req.on("error", reject);
     });
 }
 
-app.post("/download", async (req, res) => {
-    const input = req.body.images;
-    if (!input) {
-        return res.status(400).send("No input provided");
+app.get("/progress/:id", (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+
+    jobs.set(req.params.id, res);
+
+    req.on("close", () => jobs.delete(req.params.id));
+});
+
+app.post("/cancel/:id", (req, res) => {
+    const job = jobs.get(req.params.id);
+    if (job?.controller) {
+        job.controller.abort();
     }
+    res.sendStatus(200);
+});
 
-    const lines = input
-        .split("\n")
-        .map(l => l.trim())
-        .filter(Boolean);
+app.post("/download", async (req, res) => {
+    const jobId = crypto.randomUUID();
+    const lines = req.body.images.split("\n").filter(Boolean);
 
+    res.json({ jobId });
+
+    const controller = new AbortController();
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "imgzip-"));
 
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", "attachment; filename=images.zip");
+    const progress = msg => {
+        const client = jobs.get(jobId);
+        client?.write(`data: ${JSON.stringify(msg)}\n\n`);
+    };
 
-    const archive = archiver("zip");
-    archive.pipe(res);
+    const client = jobs.get(jobId);
+    if (client) client.controller = controller;
 
     try {
-        for (const line of lines) {
-            const [filename, url] = line.split(";");
-            if (!filename || !url) continue;
+        progress({ type: "start", total: lines.length });
 
-            const filePath = path.join(tempDir, filename);
-            await download(url, filePath);
-            archive.file(filePath, { name: filename });
+        const zipPath = path.join(tempDir, "images.zip");
+        const output = fs.createWriteStream(zipPath);
+        const archive = archiver("zip");
+
+        archive.pipe(output);
+
+        let count = 0;
+        for (const line of lines) {
+            if (controller.signal.aborted) break;
+
+            const [name, url] = line.split(";");
+            if (!name || !url) continue;
+
+            const filePath = path.join(tempDir, name);
+            await download(url, filePath, controller.signal);
+            archive.file(filePath, { name });
+
+            count++;
+            progress({ type: "file", current: count, total: lines.length });
         }
 
+        progress({ type: "zip" });
         await archive.finalize();
+
+        progress({ type: "done" });
+        client?.end();
+
     } catch (err) {
         console.error(err);
-        res.status(500).end();
+        progress({ type: "error" });
     } finally {
-        // cleanup
         fs.rmSync(tempDir, { recursive: true, force: true });
+        jobs.delete(jobId);
     }
 });
 
 app.listen(3000, () =>
     console.log("Running on http://localhost:3000")
 );
-

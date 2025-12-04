@@ -1,32 +1,119 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Image ZIP Downloader</title>
-    <style>
-        body {
-            font-family: system-ui, sans-serif;
-            max-width: 800px;
-            margin: 40px auto;
-        }
-        textarea {
-            width: 100%;
-            height: 300px;
-            font-family: monospace;
-        }
-        button {
-            padding: 10px 20px;
-            margin-top: 10px;
-            font-size: 16px;
-        }
-    </style>
+<meta charset="UTF-8">
+<title>Image ZIP Downloader</title>
+
+<style>
+:root {
+    --bg: #f5f5f5;
+    --fg: #111;
+    --card: #fff;
+    --accent: #2563eb;
+}
+
+[data-theme="dark"] {
+    --bg: #0f172a;
+    --fg: #e5e7eb;
+    --card: #020617;
+}
+
+body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: system-ui;
+    margin: 0;
+}
+
+.container {
+    max-width: 820px;
+    margin: 40px auto;
+    padding: 24px;
+    background: var(--card);
+    border-radius: 12px;
+}
+
+textarea {
+    width: 100%;
+    height: 280px;
+    font-family: monospace;
+}
+
+button {
+    padding: 10px 18px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.hidden { display: none; }
+</style>
 </head>
+
 <body>
-    <h2>Paste images.txt contents</h2>
-    <form method="POST" action="/download">
-        <textarea name="images" placeholder="filename.jpg;https://example.com/file.jpg"></textarea>
-        <br>
-        <button type="submit">Download ZIP</button>
-    </form>
+<div class="container">
+    <button id="themeBtn">Toggle Dark / Light</button>
+
+    <h2>Paste images.txt</h2>
+    <textarea id="input"></textarea><br><br>
+
+    <button id="start">Download ZIP</button>
+    <button id="cancel" class="hidden">Cancel</button>
+
+    <p id="status"></p>
+</div>
+
+<script>
+const themeBtn = document.getElementById("themeBtn");
+const startBtn = document.getElementById("start");
+const cancelBtn = document.getElementById("cancel");
+const status = document.getElementById("status");
+
+document.documentElement.dataset.theme =
+    localStorage.theme || "light";
+
+themeBtn.onclick = () => {
+    const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = t;
+    localStorage.theme = t;
+};
+
+let jobId, es;
+
+startBtn.onclick = async () => {
+    startBtn.disabled = true;
+    cancelBtn.classList.remove("hidden");
+
+    const res = await fetch("/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ images: input.value })
+    });
+
+    ({ jobId } = await res.json());
+
+    es = new EventSource(`/progress/${jobId}`);
+    es.onmessage = e => {
+        const msg = JSON.parse(e.data);
+
+        if (msg.type === "file")
+            status.textContent = `Downloaded ${msg.current} / ${msg.total}`;
+        if (msg.type === "zip")
+            status.textContent = "Creating ZIP…";
+        if (msg.type === "done")
+            status.textContent = "Finished!";
+    };
+};
+
+cancelBtn.onclick = async () => {
+    await fetch(`/cancel/${jobId}`, { method: "POST" });
+    es?.close();
+    status.textContent = "Canceled.";
+    startBtn.disabled = false;
+    cancelBtn.classList.add("hidden");
+};
+</script>
 </body>
 </html>
