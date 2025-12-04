@@ -96,22 +96,35 @@ app.get("/download/:id", async (req, res) => {
     archive.pipe(res);
 
     try {
-        send({ type: "start", total: job.lines.length });
 
-        for (const line of job.lines) {
-            if (job.controller.signal.aborted) break;
+	const start = Date.now();
 
-            const [name, url] = line.split(";");
-            if (!name || !url) continue;
+	send({ type: "start", total: job.lines.length });
 
-            const target = path.join(tempDir, name);
-            await download(url, target, job.controller.signal, () => {
-                done++;
-                send({ type: "file", done });
-            });
+	for (const line of job.lines) {
+	    if (job.controller.signal.aborted) break;
 
-            archive.file(target, { name });
-        }
+	    const [name, url] = line.split(";");
+	    if (!name || !url) continue;
+
+	    const target = path.join(tempDir, name);
+
+	    const t0 = Date.now();
+	    await download(url, target, job.controller.signal);
+	    const duration = Date.now() - t0;
+
+	    done++;
+
+	    send({
+	        type: "file",
+	        done,
+	        total: job.lines.length,
+	        avgMs:
+	            (Date.now() - start) / done
+	    });
+
+	    archive.file(target, { name });
+	}
 
         send({ type: "zip" });
         await archive.finalize();

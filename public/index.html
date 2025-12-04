@@ -142,22 +142,35 @@ document.getElementById("start").onclick = async () => {
 
     es = new EventSource(`/progress/${jobId}`);
     es.onmessage = e => {
-        const msg = JSON.parse(e.data);
+	    const msg = JSON.parse(e.data);
 
-        if (msg.type === "start")
-            total = msg.total;
+	    if (msg.type === "start") {
+	        total = msg.total;
+	        status.textContent = "Starting…";
+	    }
 
-        if (msg.type === "file") {
-            bar.style.width = `${(msg.done / total) * 100}%`;
-            status.textContent = `Downloaded ${msg.done} / ${total}`;
-        }
+	    if (msg.type === "file") {
+	        const percent = (msg.done / msg.total) * 100;
+	        bar.style.width = percent + "%";
 
-        if (msg.type === "zip")
-            status.textContent = "Creating ZIP…";
+	        const remaining = msg.total - msg.done;
+	        const etaMs = remaining * msg.avgMs;
 
-        if (msg.type === "done")
-            status.textContent = "Finished!";
-    };
+	        const mins = Math.floor(etaMs / 60000);
+	        const secs = Math.floor((etaMs % 60000) / 1000);
+
+	        status.textContent =
+	            `Downloaded ${msg.done}/${msg.total} — ETA: ${mins}m ${secs}s`;
+	    }
+
+	    if (msg.type === "zip") {
+	        status.textContent = "Creating ZIP…";
+	    }
+
+	    if (msg.type === "done") {
+	        status.textContent = "Finished!";
+	    }
+	};
 
     window.location = `/download/${jobId}`;
 };
