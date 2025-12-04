@@ -13,49 +13,33 @@ app.use(express.static("public"));
 
 const jobs = new Map();
 
-function download(url, dest, signal, onProgress) {
+function download(url, dest, signal) {
     const proto = url.startsWith("https") ? https : http;
-
     return new Promise((resolve, reject) => {
         const req = proto.get(url, res => {
-            if (res.statusCode !== 200)
-                return reject(new Error(`HTTP ${res.statusCode}`));
-
+            if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
             const file = fs.createWriteStream(dest);
             res.pipe(file);
-            file.on("finish", () => {
-                file.close(resolve);
-                onProgress();
-            });
+            file.on("finish", () => file.close(resolve));
         });
-
         signal?.addEventListener("abort", () => {
             req.destroy();
             reject(new Error("aborted"));
         });
-
         req.on("error", reject);
     });
 }
 
-/* ---------- Start job ---------- */
 app.post("/job", (req, res) => {
     const id = crypto.randomUUID();
-    const lines = req.body.images
-        .split("\n")
-        .map(l => l.trim())
-        .filter(Boolean);
-
     jobs.set(id, {
-        lines,
+        lines: req.body.images.split("\n").filter(Boolean),
         controller: new AbortController(),
-        clients: [],
+        clients: []
     });
-
     res.json({ id });
 });
 
-/* ---------- SSE progress ---------- */
 app.get("/progress/:id", (req, res) => {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -65,18 +49,14 @@ app.get("/progress/:id", (req, res) => {
     if (!job) return res.end();
 
     job.clients.push(res);
-    req.on("close", () => {
-        job.clients = job.clients.filter(c => c !== res);
-    });
+    req.on("close", () => { job.clients = job.clients.filter(c => c !== res); });
 });
 
-/* ---------- Cancel ---------- */
 app.post("/cancel/:id", (req, res) => {
     jobs.get(req.params.id)?.controller.abort();
     res.sendStatus(200);
 });
 
-/* ---------- ZIP download ---------- */
 app.get("/download/:id", async (req, res) => {
     const job = jobs.get(req.params.id);
     if (!job) return res.sendStatus(404);
@@ -84,10 +64,7 @@ app.get("/download/:id", async (req, res) => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "zip-"));
     let done = 0;
 
-    const send = msg =>
-        job.clients.forEach(c =>
-            c.write(`data: ${JSON.stringify(msg)}\n\n`)
-        );
+    const send = msg => job.clients.forEach(c => c.write(`data: ${JSON.stringify(msg)}\n\n`));
 
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", "attachment; filename=images.zip");
@@ -96,35 +73,24 @@ app.get("/download/:id", async (req, res) => {
     archive.pipe(res);
 
     try {
+        send({ type: "start", total: job.lines.length });
+        const start = Date.now();
 
-	const start = Date.now();
+        for (const line of job.lines) {
+            if (job.controller.signal.aborted) break;
 
-	send({ type: "start", total: job.lines.length });
+            const [name, url] = line.split(";");
+            if (!name || !url) continue;
 
-	for (const line of job.lines) {
-	    if (job.controller.signal.aborted) break;
+            const target = path.join(tempDir, name);
+            const t0 = Date.now();
+            await download(url, target, job.controller.signal);
+            done++;
+            const avgMs = (Date.now() - start) / done;
+            send({ type: "file", done, total: job.lines.length, avgMs });
 
-	    const [name, url] = line.split(";");
-	    if (!name || !url) continue;
-
-	    const target = path.join(tempDir, name);
-
-	    const t0 = Date.now();
-	    await download(url, target, job.controller.signal);
-	    const duration = Date.now() - t0;
-
-	    done++;
-
-	    send({
-	        type: "file",
-	        done,
-	        total: job.lines.length,
-	        avgMs:
-	            (Date.now() - start) / done
-	    });
-
-	    archive.file(target, { name });
-	}
+            archive.file(target, { name });
+        }
 
         send({ type: "zip" });
         await archive.finalize();
@@ -138,7 +104,4 @@ app.get("/download/:id", async (req, res) => {
     }
 });
 
-/* ---------- Start server ---------- */
-app.listen(3000, () =>
-    console.log("→ http://localhost:3000")
-);
+app.listen(3000, () => console.log("Server running on http://localhost:3000"));
