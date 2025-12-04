@@ -49,23 +49,42 @@ const status = document.getElementById("status");
 let jobId, es;
 
 document.getElementById("start").onclick = async () => {
-    progressBox.style.display = "block"; bar.style.width = "0%"; status.textContent = "Starting…";
-    const res = await fetch("/job", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({images:input.value}) });
+    progressBox.style.display = "block"; 
+    bar.style.width = "0%"; 
+    status.textContent = "Starting…";
+
+    const res = await fetch("/job", { 
+        method:"POST", 
+        headers:{"Content-Type":"application/json"}, 
+        body:JSON.stringify({images:input.value}) 
+    });
     ({ id: jobId } = await res.json());
 
     es = new EventSource(`/progress/${jobId}`);
+    let firstUpdate = false;
+
     es.onmessage = e => {
         const msg = JSON.parse(e.data);
+
+        if (!firstUpdate) {
+            firstUpdate = true;
+            status.textContent = "";
+        }
+
         if(msg.type==="file"){
             const percent = (msg.done/msg.total)*100;
             bar.style.width = percent+"%";
             const remaining = msg.total-msg.done;
             const etaMs = remaining*msg.avgMs;
-            const mins = Math.floor(etaMs/60000); const secs=Math.floor((etaMs%60000)/1000);
+            const mins = Math.floor(etaMs/60000); 
+            const secs = Math.floor((etaMs%60000)/1000);
             status.textContent=`Downloaded ${msg.done}/${msg.total} — ETA: ${mins}m ${secs}s`;
         }
         if(msg.type==="zip") status.textContent="Creating ZIP…";
-        if(msg.type==="done") status.textContent="Finished!";
+        if(msg.type==="done") {
+            status.textContent="Finished!";
+            bar.style.width="100%";
+        }
         if(msg.type==="error") status.textContent="Error occurred!";
     };
 
@@ -74,8 +93,10 @@ document.getElementById("start").onclick = async () => {
 
 document.getElementById("cancel").onclick = () => {
     fetch(`/cancel/${jobId}`,{method:"POST"});
-    es?.close(); status.textContent="Canceled.";
+    es?.close(); 
+    status.textContent="Canceled.";
 };
 </script>
+
 </body>
 </html>
