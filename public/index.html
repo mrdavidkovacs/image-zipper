@@ -46,7 +46,7 @@ document.getElementById("theme").onclick = () => {
 const bar = document.querySelector(".progress > div");
 const progressBox = document.querySelector(".progress");
 const status = document.getElementById("status");
-let jobId, es;
+let jobId, es, controller;
 
 document.getElementById("start").onclick = async () => {
     progressBox.style.display = "block"; 
@@ -59,6 +59,8 @@ document.getElementById("start").onclick = async () => {
         body:JSON.stringify({images:input.value}) 
     });
     ({ id: jobId } = await res.json());
+
+    controller = new AbortController();
 
     es = new EventSource(`/progress/${jobId}`);
     let firstUpdate = false;
@@ -82,19 +84,38 @@ document.getElementById("start").onclick = async () => {
         }
         if(msg.type==="zip") status.textContent="Creating ZIP…";
         if(msg.type==="done") {
-            status.textContent="Finished!";
             bar.style.width="100%";
+            status.textContent="Finished! Downloading ZIP…";
         }
         if(msg.type==="error") status.textContent="Error occurred!";
     };
 
-    window.location=`/download/${jobId}`;
+    // Fetch ZIP as blob and trigger download without navigating away
+    fetch(`/download/${jobId}`, { signal: controller.signal })
+        .then(r => r.blob())
+        .then(blob => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "images.zip";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            status.textContent = "Download complete!";
+        })
+        .catch(err => {
+            if (err.name === "AbortError") status.textContent="Download canceled";
+            else status.textContent="Error downloading ZIP";
+        });
 };
 
 document.getElementById("cancel").onclick = () => {
+    controller?.abort();
     fetch(`/cancel/${jobId}`,{method:"POST"});
     es?.close(); 
     status.textContent="Canceled.";
+    bar.style.width="0%";
 };
 </script>
 
