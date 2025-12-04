@@ -75,10 +75,11 @@ jobs:
    
       # 4️⃣ Create new tag
       - name: Create GitHub release
-        uses: ncipollo/release-action@v1
         if: github.ref == 'refs/heads/main'
+        uses: ncipollo/release-action@v1
         with:
           tag: ${{ steps.version.outputs.version }}
-          release_name: "Release ${{ steps.version.outputs.version }}"
+          release_name: Release ${{ steps.version.outputs.version }}
           draft: false
+          token: ${{ secrets.PAT_TOKEN }}
 
