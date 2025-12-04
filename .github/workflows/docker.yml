@@ -1,11 +1,13 @@
-name: Docker
+name: Docker Build & Push
 
 on:
   push:
     branches: ["main"]
+  pull_request:
+    branches: ["main"]
 
 jobs:
-  build:
+  docker:
     runs-on: ubuntu-latest
 
     permissions:
@@ -13,15 +15,30 @@ jobs:
       packages: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: docker/login-action@v3
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v5
+      - name: Set image tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "TAG=pr-${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+          else
+            echo "TAG=latest" >> $GITHUB_ENV
+          fi
+
+      - name: Build and push Docker image with cache
+        uses: docker/build-push-action@v5
         with:
+          context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:latest
+          tags: ghcr.io/${{ github.repository }}:${{ env.TAG }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:${{ env.TAG }}
+          cache-to: type=inline
