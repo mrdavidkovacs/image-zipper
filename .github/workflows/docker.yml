@@ -1,4 +1,4 @@
-name: Docker Build & Push with SemVer
+name: Docker Build & Push
 
 on:
   push:
@@ -21,24 +21,38 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      # 1️⃣ Increment version
       - name: Get next version
         id: version
         uses: reecetech/version-increment@2024.10.1
         with:
           scheme: semver
           increment: patch
-      
-      - name: Determine Docker tags
+
+      # 2️⃣ Determine Docker tags
+      - name: Determine image tags
         id: tags
         run: |
-          echo "TAG=v${{ steps.version.outputs.version }}" >> $GITHUB_ENV
-          TAGS="ghcr.io/${GITHUB_REPOSITORY}:${TAG}"
+          # Get the incremented version
+          VERSION="v${{ steps.version.outputs.version }}"
+
+          echo "TAG=$VERSION" >> $GITHUB_ENV
+
+          TAGS="ghcr.io/${GITHUB_REPOSITORY}:${VERSION}"
+
+          # Add latest only on push to main
           if [ "${{ github.event_name }}" = "push" ]; then
             TAGS="$TAGS,ghcr.io/${GITHUB_REPOSITORY}:latest"
           fi
+
+          # If this is a PR, prepend pr-<number>
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            TAGS="ghcr.io/${GITHUB_REPOSITORY}:pr-${{ github.event.pull_request.number }}-${VERSION}"
+          fi
+
           echo "TAGS=$TAGS" >> $GITHUB_ENV
 
-
+      # 3️⃣ Login to GitHub Container Registry
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -46,6 +60,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 4️⃣ Build and push Docker image with caching
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -54,4 +69,3 @@ jobs:
           tags: ${{ env.TAGS }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:${{ env.TAG }}
           cache-to: type=inline
-
