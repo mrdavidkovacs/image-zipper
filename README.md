@@ -24,6 +24,7 @@ Supports progress bar, ETA, light/dark mode, and cancel.
 ```bash
 git clone https://github.com/mrdavidkovacs/image-zipper.git
 cd image-zipper
+```
 
 2. **Run with Docker Compose**:
 docker-compose up -d
