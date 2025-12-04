@@ -1,4 +1,4 @@
-name: Docker Build & Push with Semver
+name: Docker Build & Push with SemVer
 
 on:
   push:
@@ -17,27 +17,28 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      # Determine semver version
-      - name: Get semver
-        id: semver
-        uses: devops-infra/action-semver@v2
         with:
-          version-file: "VERSION"
-          increment: "patch"
-          commit: false
+          fetch-depth: 0
+          fetch-tags: true
 
-      - name: Set image tag
+      - name: Get next version
+        id: version
+        uses: reecetech/version-increment@2024.10.1
+        with:
+          scheme: semver
+          increment: patch
+
+      - name: Determine image tag
         id: tag
         run: |
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            echo "TAG=pr-${{ github.event.pull_request.number }}-v${{ steps.semver.outputs.new_version }}" >> $GITHUB_ENV
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "TAG=pr-${{ github.event.pull_request.number }}-v${{ steps.version.outputs.version }}" >> "$GITHUB_ENV"
           else
-            echo "TAG=v${{ steps.semver.outputs.new_version }}" >> $GITHUB_ENV
-            echo "LATEST_TAG=latest" >> $GITHUB_ENV
+            echo "TAG=v${{ steps.version.outputs.version }}" >> "$GITHUB_ENV"
+            echo "LATEST=true" >> "$GITHUB_ENV"
           fi
 
-      - name: Login to GitHub Container Registry
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -51,6 +52,6 @@ jobs:
           push: true
           tags: |
             ghcr.io/${{ github.repository }}:${{ env.TAG }}
-            ${{ env.LATEST_TAG && format('ghcr.io/${{ github.repository }}:${{ env.LATEST_TAG }}') }}
+            ${{ env.LATEST && format('ghcr.io/${{ github.repository }}:latest') }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:${{ env.TAG }}
           cache-to: type=inline
