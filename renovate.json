@@ -3,7 +3,7 @@
 
   "extends": [
     "config:recommended",
-    ":enableDependencyDashboard",
+    ":dependencyDashboard",
     ":semanticCommits"
   ],
 
