@@ -6,10 +6,21 @@
 
 <style>
 :root {
-    --bg: #f5f5f5;
-    --fg: #111;
-    --card: #fff;
+    --bg: #f4f4f5;
+    --fg: #0f172a;
+    --card: #ffffff;
+    --muted: #64748b;
     --accent: #2563eb;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #0f172a;
+        --fg: #e5e7eb;
+        --card: #020617;
+        --muted: #94a3b8;
+        --accent: #3b82f6;
+    }
 }
 
 [data-theme="dark"] {
@@ -19,10 +30,10 @@
 }
 
 body {
+    margin: 0;
     background: var(--bg);
     color: var(--fg);
     font-family: system-ui;
-    margin: 0;
 }
 
 .container {
@@ -30,90 +41,129 @@ body {
     margin: 40px auto;
     padding: 24px;
     background: var(--card);
-    border-radius: 12px;
+    border-radius: 14px;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 textarea {
     width: 100%;
-    height: 280px;
+    height: 260px;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--muted);
+    border-radius: 8px;
+    padding: 12px;
     font-family: monospace;
 }
 
-button {
-    padding: 10px 18px;
-    background: var(--accent);
-    color: white;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
+.progress {
+    height: 10px;
+    background: #1e293b;
+    border-radius: 99px;
+    overflow: hidden;
+    margin-top: 16px;
+    display: none;
 }
 
-.hidden { display: none; }
+.progress > div {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    transition: width 0.3s;
+}
+
+button {
+    margin-top: 12px;
+    padding: 10px 16px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    background: var(--accent);
+    color: white;
+}
+
+.status {
+    margin-top: 10px;
+    color: var(--muted);
+}
 </style>
 </head>
 
 <body>
 <div class="container">
-    <button id="themeBtn">Toggle Dark / Light</button>
+<header>
+    <h2>Image ZIP Downloader</h2>
+    <button id="theme">🌙</button>
+</header>
 
-    <h2>Paste images.txt</h2>
-    <textarea id="input"></textarea><br><br>
+<textarea id="input"></textarea>
 
-    <button id="start">Download ZIP</button>
-    <button id="cancel" class="hidden">Cancel</button>
+<button id="start">Download ZIP</button>
+<button id="cancel" hidden>Cancel</button>
 
-    <p id="status"></p>
+<div class="progress">
+    <div></div>
+</div>
+
+<div class="status" id="status"></div>
 </div>
 
 <script>
-const themeBtn = document.getElementById("themeBtn");
-const startBtn = document.getElementById("start");
-const cancelBtn = document.getElementById("cancel");
-const status = document.getElementById("status");
+const root = document.documentElement;
+const bar = document.querySelector(".progress > div");
+const progressBox = document.querySelector(".progress");
 
-document.documentElement.dataset.theme =
-    localStorage.theme || "light";
+root.dataset.theme = localStorage.theme || "";
 
-themeBtn.onclick = () => {
-    const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = t;
+document.getElementById("theme").onclick = () => {
+    const t = root.dataset.theme === "dark" ? "light" : "dark";
+    root.dataset.theme = t;
     localStorage.theme = t;
 };
 
-let jobId, es;
+let jobId, es, total = 0;
 
-startBtn.onclick = async () => {
-    startBtn.disabled = true;
-    cancelBtn.classList.remove("hidden");
+document.getElementById("start").onclick = async () => {
+    progressBox.style.display = "block";
+    bar.style.width = "0%";
 
-    const res = await fetch("/download", {
+    const res = await fetch("/job", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ images: input.value })
     });
 
-    ({ jobId } = await res.json());
+    ({ id: jobId } = await res.json());
 
     es = new EventSource(`/progress/${jobId}`);
     es.onmessage = e => {
         const msg = JSON.parse(e.data);
 
-        if (msg.type === "file")
-            status.textContent = `Downloaded ${msg.current} / ${msg.total}`;
+        if (msg.type === "start")
+            total = msg.total;
+
+        if (msg.type === "file") {
+            bar.style.width = `${(msg.done / total) * 100}%`;
+            status.textContent = `Downloaded ${msg.done} / ${total}`;
+        }
+
         if (msg.type === "zip")
             status.textContent = "Creating ZIP…";
+
         if (msg.type === "done")
             status.textContent = "Finished!";
     };
+
+    window.location = `/download/${jobId}`;
 };
 
-cancelBtn.onclick = async () => {
-    await fetch(`/cancel/${jobId}`, { method: "POST" });
-    es?.close();
-    status.textContent = "Canceled.";
-    startBtn.disabled = false;
-    cancelBtn.classList.add("hidden");
-};
+document.getElementById("cancel").onclick = () =>
+    fetch(`/cancel/${jobId}`, { method: "POST" });
 </script>
 </body>
 </html>

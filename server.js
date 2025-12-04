@@ -5,29 +5,31 @@ import os from "os";
 import https from "https";
 import http from "http";
 import archiver from "archiver";
+import crypto from "crypto";
 
 const app = express();
-app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static("public"));
 
 const jobs = new Map();
 
-function download(url, dest, signal) {
+function download(url, dest, signal, onProgress) {
     const proto = url.startsWith("https") ? https : http;
 
     return new Promise((resolve, reject) => {
         const req = proto.get(url, res => {
-            if (res.statusCode !== 200) {
-                reject(new Error(`HTTP ${res.statusCode}`));
-                return;
-            }
+            if (res.statusCode !== 200)
+                return reject(new Error(`HTTP ${res.statusCode}`));
+
             const file = fs.createWriteStream(dest);
             res.pipe(file);
-            file.on("finish", () => file.close(resolve));
+            file.on("finish", () => {
+                file.close(resolve);
+                onProgress();
+            });
         });
 
-        signal.addEventListener("abort", () => {
+        signal?.addEventListener("abort", () => {
             req.destroy();
             reject(new Error("aborted"));
         });
@@ -36,80 +38,94 @@ function download(url, dest, signal) {
     });
 }
 
+/* ---------- Start job ---------- */
+app.post("/job", (req, res) => {
+    const id = crypto.randomUUID();
+    const lines = req.body.images
+        .split("\n")
+        .map(l => l.trim())
+        .filter(Boolean);
+
+    jobs.set(id, {
+        lines,
+        controller: new AbortController(),
+        clients: [],
+    });
+
+    res.json({ id });
+});
+
+/* ---------- SSE progress ---------- */
 app.get("/progress/:id", (req, res) => {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
 
-    jobs.set(req.params.id, res);
+    const job = jobs.get(req.params.id);
+    if (!job) return res.end();
 
-    req.on("close", () => jobs.delete(req.params.id));
+    job.clients.push(res);
+    req.on("close", () => {
+        job.clients = job.clients.filter(c => c !== res);
+    });
 });
 
+/* ---------- Cancel ---------- */
 app.post("/cancel/:id", (req, res) => {
-    const job = jobs.get(req.params.id);
-    if (job?.controller) {
-        job.controller.abort();
-    }
+    jobs.get(req.params.id)?.controller.abort();
     res.sendStatus(200);
 });
 
-app.post("/download", async (req, res) => {
-    const jobId = crypto.randomUUID();
-    const lines = req.body.images.split("\n").filter(Boolean);
+/* ---------- ZIP download ---------- */
+app.get("/download/:id", async (req, res) => {
+    const job = jobs.get(req.params.id);
+    if (!job) return res.sendStatus(404);
 
-    res.json({ jobId });
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "zip-"));
+    let done = 0;
 
-    const controller = new AbortController();
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "imgzip-"));
+    const send = msg =>
+        job.clients.forEach(c =>
+            c.write(`data: ${JSON.stringify(msg)}\n\n`)
+        );
 
-    const progress = msg => {
-        const client = jobs.get(jobId);
-        client?.write(`data: ${JSON.stringify(msg)}\n\n`);
-    };
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", "attachment; filename=images.zip");
 
-    const client = jobs.get(jobId);
-    if (client) client.controller = controller;
+    const archive = archiver("zip");
+    archive.pipe(res);
 
     try {
-        progress({ type: "start", total: lines.length });
+        send({ type: "start", total: job.lines.length });
 
-        const zipPath = path.join(tempDir, "images.zip");
-        const output = fs.createWriteStream(zipPath);
-        const archive = archiver("zip");
-
-        archive.pipe(output);
-
-        let count = 0;
-        for (const line of lines) {
-            if (controller.signal.aborted) break;
+        for (const line of job.lines) {
+            if (job.controller.signal.aborted) break;
 
             const [name, url] = line.split(";");
             if (!name || !url) continue;
 
-            const filePath = path.join(tempDir, name);
-            await download(url, filePath, controller.signal);
-            archive.file(filePath, { name });
+            const target = path.join(tempDir, name);
+            await download(url, target, job.controller.signal, () => {
+                done++;
+                send({ type: "file", done });
+            });
 
-            count++;
-            progress({ type: "file", current: count, total: lines.length });
+            archive.file(target, { name });
         }
 
-        progress({ type: "zip" });
+        send({ type: "zip" });
         await archive.finalize();
+        send({ type: "done" });
 
-        progress({ type: "done" });
-        client?.end();
-
-    } catch (err) {
-        console.error(err);
-        progress({ type: "error" });
+    } catch (e) {
+        send({ type: "error" });
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
-        jobs.delete(jobId);
+        jobs.delete(req.params.id);
     }
 });
 
+/* ---------- Start server ---------- */
 app.listen(3000, () =>
-    console.log("Running on http://localhost:3000")
+    console.log("→ http://localhost:3000")
 );
