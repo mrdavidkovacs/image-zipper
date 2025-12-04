@@ -8,6 +8,11 @@ RUN npm install --production
 COPY server.js .
 COPY public ./public
 
+ARG APP_VERSION=v0.0.0
+ARG PR_NUMBER=
+ENV APP_VERSION=${APP_VERSION}
+ENV PR_NUMBER=${PR_NUMBER}
+
 EXPOSE 3000
 CMD ["node", "server.js"]
 

@@ -4,18 +4,24 @@
 <meta charset="UTF-8">
 <title>Image ZIP Downloader</title>
 <style>
-:root {
-    --bg: #f4f4f5; --fg: #0f172a; --card: #fff; --muted: #64748b; --accent: #2563eb;
-}
-[data-theme="dark"] { --bg: #0f172a; --fg: #e5e7eb; --card: #020617; --muted: #94a3b8; --accent: #3b82f6; }
+:root { --bg:#f4f4f5; --fg:#0f172a; --card:#fff; --muted:#64748b; --accent:#2563eb; }
+[data-theme="dark"] { --bg:#0f172a; --fg:#e5e7eb; --card:#020617; --muted:#94a3b8; --accent:#3b82f6; }
+
 body { margin:0; font-family:system-ui; background:var(--bg); color:var(--fg);}
 .container { max-width:820px; margin:40px auto; padding:24px; background:var(--card); border-radius:14px; }
 header { display:flex; justify-content:space-between; align-items:center; }
 textarea { width:100%; height:260px; background:var(--bg); color:var(--fg); border:1px solid var(--muted); border-radius:8px; padding:12px; font-family:monospace; }
-.progress { height:10px; background:#1e293b; border-radius:99px; overflow:hidden; margin-top:16px; display:none; }
+
+.progress { height:10px; background:#1e293b; border-radius:99px; overflow:hidden; margin-top:16px; display:none; position:relative; }
 .progress > div { height:100%; width:0%; background:var(--accent); transition:width 0.3s; }
+.progress .spinner { position:absolute; top:50%; left:50%; width:20px; height:20px; margin:-10px 0 0 -10px; border:3px solid var(--accent); border-top-color:transparent; border-radius:50%; display:none; animation:spin 1s linear infinite; }
+@keyframes spin { 100% { transform: rotate(360deg); } }
+
 button { margin-top:12px; padding:10px 16px; border-radius:6px; border:none; cursor:pointer; background:var(--accent); color:white; }
+button:disabled { opacity:0.6; cursor:not-allowed; }
+
 .status { margin-top:10px; color:var(--muted); }
+.version { margin-top:10px; font-size:0.9rem; color:var(--muted); text-align:right; }
 </style>
 </head>
 <body>
@@ -30,8 +36,13 @@ button { margin-top:12px; padding:10px 16px; border-radius:6px; border:none; cur
 <button id="start">Download ZIP</button>
 <button id="cancel" hidden>Cancel</button>
 
-<div class="progress"><div></div></div>
+<div class="progress">
+    <div></div>
+    <div class="spinner"></div>
+</div>
+
 <div class="status" id="status"></div>
+<div class="version" id="version"></div>
 </div>
 
 <script>
@@ -44,13 +55,27 @@ document.getElementById("theme").onclick = () => {
 };
 
 const bar = document.querySelector(".progress > div");
+const spinner = document.querySelector(".progress .spinner");
 const progressBox = document.querySelector(".progress");
 const status = document.getElementById("status");
+const startBtn = document.getElementById("start");
+const cancelBtn = document.getElementById("cancel");
+const versionDiv = document.getElementById("version");
+
 let jobId, es, controller;
 
-document.getElementById("start").onclick = async () => {
-    progressBox.style.display = "block"; 
-    bar.style.width = "0%"; 
+// Fetch version info
+fetch("/version.json").then(r=>r.json()).then(v=>{
+    if(v.pr) versionDiv.textContent = `Version: ${v.version} (PR #${v.pr})`;
+    else versionDiv.textContent = `Version: ${v.version}`;
+});
+
+startBtn.onclick = async () => {
+    startBtn.disabled = true;
+    cancelBtn.hidden = false;
+    progressBox.style.display = "block";
+    bar.style.width = "0%";
+    spinner.style.display = "none";
     status.textContent = "Starting…";
 
     const res = await fetch("/job", { 
@@ -61,7 +86,6 @@ document.getElementById("start").onclick = async () => {
     ({ id: jobId } = await res.json());
 
     controller = new AbortController();
-
     es = new EventSource(`/progress/${jobId}`);
     let firstUpdate = false;
 
@@ -74,6 +98,7 @@ document.getElementById("start").onclick = async () => {
         }
 
         if(msg.type==="file"){
+            spinner.style.display = "none";
             const percent = (msg.done/msg.total)*100;
             bar.style.width = percent+"%";
             const remaining = msg.total-msg.done;
@@ -82,15 +107,25 @@ document.getElementById("start").onclick = async () => {
             const secs = Math.floor((etaMs%60000)/1000);
             status.textContent=`Downloaded ${msg.done}/${msg.total} — ETA: ${mins}m ${secs}s`;
         }
-        if(msg.type==="zip") status.textContent="Creating ZIP…";
+        if(msg.type==="zip") {
+            status.textContent="Creating ZIP…";
+            spinner.style.display = "block";
+        }
         if(msg.type==="done") {
             bar.style.width="100%";
-            status.textContent="Finished! Downloading ZIP…";
+            spinner.style.display = "none";
+            status.textContent="Download complete!";
+            startBtn.disabled = false;
+            cancelBtn.hidden = true;
         }
-        if(msg.type==="error") status.textContent="Error occurred!";
+        if(msg.type==="error") {
+            spinner.style.display = "none";
+            status.textContent="Error occurred!";
+            startBtn.disabled = false;
+            cancelBtn.hidden = true;
+        }
     };
 
-    // Fetch ZIP as blob and trigger download without navigating away
     fetch(`/download/${jobId}`, { signal: controller.signal })
         .then(r => r.blob())
         .then(blob => {
@@ -102,22 +137,26 @@ document.getElementById("start").onclick = async () => {
             a.click();
             a.remove();
             URL.revokeObjectURL(url);
-            status.textContent = "Download complete!";
         })
         .catch(err => {
-            if (err.name === "AbortError") status.textContent="Download canceled";
+            if(err.name==="AbortError") status.textContent="Download canceled";
             else status.textContent="Error downloading ZIP";
+            startBtn.disabled = false;
+            cancelBtn.hidden = true;
+            spinner.style.display = "none";
         });
 };
 
-document.getElementById("cancel").onclick = () => {
+cancelBtn.onclick = () => {
     controller?.abort();
     fetch(`/cancel/${jobId}`,{method:"POST"});
-    es?.close(); 
+    es?.close();
     status.textContent="Canceled.";
     bar.style.width="0%";
+    spinner.style.display="none";
+    startBtn.disabled = false;
+    cancelBtn.hidden = true;
 };
 </script>
-
 </body>
 </html>

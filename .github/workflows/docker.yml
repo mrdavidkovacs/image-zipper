@@ -1,4 +1,4 @@
-name: Docker Build & Push
+name: Docker Build & Push with Semver
 
 on:
   push:
@@ -18,6 +18,25 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Determine semver version
+      - name: Get semver
+        id: semver
+        uses: devops-infra/action-semver@v2
+        with:
+          version-file: "VERSION"
+          increment: "patch"
+          commit: false
+
+      - name: Set image tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "TAG=pr-${{ github.event.pull_request.number }}-v${{ steps.semver.outputs.new_version }}" >> $GITHUB_ENV
+          else
+            echo "TAG=v${{ steps.semver.outputs.new_version }}" >> $GITHUB_ENV
+            echo "LATEST_TAG=latest" >> $GITHUB_ENV
+          fi
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -25,20 +44,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set image tag
-        id: tag
-        run: |
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            echo "TAG=pr-${{ github.event.pull_request.number }}" >> $GITHUB_ENV
-          else
-            echo "TAG=latest" >> $GITHUB_ENV
-          fi
-
       - name: Build and push Docker image with cache
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:${{ env.TAG }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ env.TAG }}
+            ${{ env.LATEST_TAG && format('ghcr.io/${{ github.repository }}:${{ env.LATEST_TAG }}') }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:${{ env.TAG }}
           cache-to: type=inline

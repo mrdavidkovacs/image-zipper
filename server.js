@@ -30,6 +30,14 @@ function download(url, dest, signal) {
     });
 }
 
+// version.json endpoint
+app.get("/version.json", (req, res) => {
+    res.json({
+        version: process.env.APP_VERSION || "v0.0.0",
+        pr: process.env.PR_NUMBER || null
+    });
+});
+
 app.post("/job", (req, res) => {
     const id = crypto.randomUUID();
     jobs.set(id, {
