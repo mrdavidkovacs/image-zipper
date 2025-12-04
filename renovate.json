@@ -1,0 +1,43 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+
+  "extends": [
+    "config:recommended",
+    ":disableDependencyDashboard",
+    ":semanticCommits"
+  ],
+
+  "timezone": "UTC",
+
+  "labels": ["dependencies"],
+
+  "assignees": ["@${{ github.repository_owner }}"],
+
+  "packageRules": [
+    {
+      "matchManagers": ["npm"],
+      "groupName": "node dependencies",
+      "groupSlug": "node-deps"
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "groupName": "docker dependencies"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    }
+  ],
+
+  "commitMessagePrefix": "chore(deps):",
+
+  "rangeStrategy": "bump",
+
+  "docker": {
+    "enabled": true
+  },
+
+  "npm": {
+    "enabled": true
+  }
+}
