@@ -28,15 +28,14 @@ jobs:
           scheme: semver
           increment: patch
 
-      - name: Determine image tag
-        id: tag
+      - name: Determine image tags
+        id: tags
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "TAG=pr-${{ github.event.pull_request.number }}-v${{ steps.version.outputs.version }}" >> "$GITHUB_ENV"
-          else
-            echo "TAG=v${{ steps.version.outputs.version }}" >> "$GITHUB_ENV"
-            echo "LATEST=true" >> "$GITHUB_ENV"
+          TAGS="ghcr.io/${GITHUB_REPOSITORY}:${TAG}"
+          if [ "${LATEST}" = "true" ]; then
+            TAGS="$TAGS,ghcr.io/${GITHUB_REPOSITORY}:latest"
           fi
+          echo "TAGS=$TAGS" >> $GITHUB_ENV
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -50,8 +49,6 @@ jobs:
         with:
           context: .
           push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:${{ env.TAG }}
-            ${{ env.LATEST && format('ghcr.io/${{ github.repository }}:latest') }}
+          tags: ${{ env.TAGS }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:${{ env.TAG }}
           cache-to: type=inline
